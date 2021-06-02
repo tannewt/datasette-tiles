@@ -9,19 +9,8 @@ from datasette_tiles.utils import (
 import json
 import math
 
-# 256x256 PNG of colour #dddddd, compressed using https://squoosh.app
-PNG_404 = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x04\x00\x00"
-    b"\x00\x00\xbc\xe9\x1a\xbb\x00\x00\x00\x9cIDATx\xda\xed\xce1\x01\x00\x00\x0c\x02"
-    b"\xa0\xd9?\xe3\xba\x18\xc3\x07\x12\x90\xbf\xad\x08\x08\x08\x08\x08\x08\x08\x08"
-    b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08"
-    b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08"
-    b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08"
-    b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08"
-    b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08"
-    b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08\xac"
-    b"\x03\x05\xddg\xde\x01\xd26\xe7\xdd\x00\x00\x00\x00IEND\xaeB`\x82"
-)
+# Empty vector tile from tilemaker
+MVT_404 = b"\x1F\x8B\x08\x00\xFA\x78\x18\x5E\x00\x03\x93\xE2\xE3\x62\x8F\x8F\x4F\xCD\x2D\x28\xA9\xD4\x68\x50\xA8\x60\x02\x00\x64\x71\x44\x36\x10\x00\x00\x00"
 
 SELECT_TILE_SQL = """
 select
@@ -38,16 +27,16 @@ where
 @hookimpl
 def register_routes():
     return [
-        (r"/-/tiles$", index),
-        (r"/-/tiles/(?P<db_name>[^/]+)$", explorer),
-        (r"/-/tiles/(?P<db_name>[^/]+)/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$", tile),
+        (r"/-/vector-tiles$", index),
+        (r"/-/vector-tiles/(?P<db_name>[^/]+)$", explorer),
+        (r"/-/vector-tiles/(?P<db_name>[^/]+)/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.mvt$", tile),
         (
-            r"/-/tiles-tms/(?P<db_name>[^/]+)/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$",
+            r"/-/vector-tiles-tms/(?P<db_name>[^/]+)/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.mvt$",
             tile_tms,
         ),
-        (r"/-/tiles-stack$", tiles_stack_explorer),
-        (r"/-/tiles-stack/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$", tiles_stack),
-        (r"/-/tiles-stack-tms/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$", tiles_stack_tms),
+        (r"/-/vector-tiles-stack$", tiles_stack_explorer),
+        (r"/-/vector-tiles-stack/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.mvt$", tiles_stack),
+        (r"/-/vector-tiles-stack-tms/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.mvt$", tiles_stack_tms),
     ]
 
 
@@ -95,8 +84,8 @@ async def _tile(request, datasette, tms):
     db = datasette.get_database(db_name)
     tile = await load_tile(db, request, tms)
     if tile is None:
-        return Response(body=PNG_404, content_type="image/png", status=404)
-    return Response(body=tile, content_type="image/png")
+        return Response(body=MVT_404, content_type="application/vnd.mapbox-vector-tile", status=404, headers={'Content-Encoding': 'gzip'})
+    return Response(body=tile, content_type="application/vnd.mapbox-vector-tile", headers={'Content-Encoding': 'gzip'})
 
 
 async def _tiles_stack(datasette, request, tms):
@@ -105,8 +94,8 @@ async def _tiles_stack(datasette, request, tms):
     for database in priority_order:
         tile = await load_tile(database, request, tms=tms)
         if tile is not None:
-            return Response(body=tile, content_type="image/png")
-    return Response(body=PNG_404, content_type="image/png", status=404)
+            return Response(body=tile, content_type="application/vnd.mapbox-vector-tile", headers={'Content-Encoding': 'gzip'})
+    return Response(body=MVT_404, content_type="application/vnd.mapbox-vector-tile", status=404, headers={'Content-Encoding': 'gzip'})
 
 
 async def tiles_stack(datasette, request):
@@ -227,7 +216,7 @@ def database_actions(datasette, database):
         if database in mbtiles_databases:
             return [
                 {
-                    "href": datasette.urls.path("/-/tiles/{}".format(database)),
+                    "href": datasette.urls.path("/-/vector-tiles/{}".format(database)),
                     "label": "Explore these tiles on a map",
                 }
             ]
@@ -244,7 +233,7 @@ def table_actions(datasette, database, table):
         if database in mbtiles_databases:
             return [
                 {
-                    "href": datasette.urls.path("/-/tiles/{}".format(database)),
+                    "href": datasette.urls.path("/-/vector-tiles/{}".format(database)),
                     "label": "Explore these tiles on a map",
                 }
             ]
